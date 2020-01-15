@@ -1,0 +1,124 @@
+- name: Print project name
+  debug:
+    msg: "{{projectName}}"
+
+- name: Register root project folder
+  stat:
+    path: "{{root_project_path}}"
+  register: projectStat
+
+- name: Create root project folder if not exists
+  file:
+    path: "{{item.path}}"
+    state: directory
+  with_items:
+    - {path: "{{root_project_path}}"}
+    - {path: "{{gradle_folder}}"}
+    - {path: "{{checkstyle_folder}}"}
+    - {path: "{{dependency_check_folder}}"}
+    - {path: "{{root_project_path}}/src/main/java/com/thoughtworks/{{projectName}}/controller"}
+  when: projectStat.stat.exists == false
+
+- name: Init gradle project
+  command: "gradle init --type {{project_type}} --project-name {{project_name}} --dsl groovy --test-framework junit --package {{default_package}}"
+  args:
+    chdir: "{{root_project_path}}"
+
+- name: Copy gradle template
+  copy:
+    src: "templates/{{item.template}}.tmpl"
+    dest: "{{item.path}}/{{item.name}}"
+  with_items: "{{config_file_list}}"
+
+- name: Write group
+  lineinfile:
+    path: "{{root_project_path}}/build.gradle"
+    regexp: '^group = '
+    line: 'group = "{{default_package}}"'
+
+- name: Write main class
+  lineinfile:
+    path: "{{root_project_path}}/build.gradle"
+    regexp: '^mainClassName = '
+    line: 'mainClassName = "{{default_package}}.Application"'
+  when: project_type == "java-application"
+
+- name: Write Application package
+  lineinfile:
+    path: "{{root_project_path}}/src/main/java/com/thoughtworks/{{projectName}}/Application.java"
+    regexp: '^package '
+    line: 'package {{default_package}};'
+  when: project_type == "java-application"
+
+- name: Write Application package
+  lineinfile:
+    path: "{{root_project_path}}/src/main/java/com/thoughtworks/{{projectName}}/controller/TestController.java"
+    regexp: '^package '
+    line: 'package {{default_package}}.controller;'
+  when: project_type == "java-application"
+
+- name: Write Application package
+  lineinfile:
+    path: "{{root_project_path}}/Dockerfile"
+    regexp: '^ADD '
+    line: 'ADD build/libs/{{projectName}}.jar  app.jar'
+  when: project_type == "java-application"
+
+- name: Delete auto create java file
+  file:
+    path: "{{item.path}}"
+    state: absent
+  with_items:
+    - { path: "{{root_project_path}}/src/main/java/com/thoughtworks/{{project_name}}/Library.java"}
+    - { path: "{{root_project_path}}/src/test/java/com/thoughtworks/{{project_name}}/LibraryTest.java"}
+  when: project_type == "java-library"
+
+- name: Delete auto create java file
+  file:
+    path: "{{item.path}}"
+    state: absent
+  with_items:
+    - { path: "{{root_project_path}}/src/main/java/com/thoughtworks/{{project_name}}/App.java"}
+    - { path: "{{root_project_path}}/src/test/java/com/thoughtworks/{{project_name}}/AppTest.java"}
+  when: project_type == "java-application"
+
+- name: Gradle idea
+  command: "./gradlew idea"
+  args:
+    chdir: "{{root_project_path}}"
+
+- name: Create new git hub repository
+  uri:
+    url: "{{github_api_baseUrl}}{{create_repository_endpoint_url}}"
+    method: POST
+    headers:
+      Accept: application/vnd.github.v3+json
+    user: "{{github_account}}"
+    password: "{{github_password}}"
+    force_basic_auth: yes
+    body: "{\"name\": \"{{project_name}}\",\"private\": {{private_repository}}}"
+    body_format: json
+    validate_certs: false
+    status_code: 201
+    return_content: yes
+  register: repositories
+
+- name: Print response
+  debug:
+    msg: "{{repositories}}"
+
+- name: Init git repository
+  command: "{{item}}"
+  args:
+    chdir: "{{root_project_path}}"
+  with_items:
+    - "git init"
+    - "git add ."
+    - "git commit -m \"Init {{project_name}} code base \""
+    - "git remote add origin {{github_home}}/{{github_account}}/{{project_name}}.git"
+    - "git push origin master"
+
+- name: Open project with IntelliJ IDEA
+  shell: open {{project_name}}.ipr
+  args:
+    chdir: "{{root_project_path}}"
